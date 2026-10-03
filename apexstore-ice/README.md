@@ -24,7 +24,7 @@ apexstore-ice/
 ├── config/                        # db/gateways/backend/client.config
 ├── scripts/                       # run-all.sh (levanta todo) / stop-all.sh (detiene nodos)
 ├── build.gradle / settings.gradle # ice-compat 3.7.10 + tarea generateSlice
-└── docs/                          # ARQUITECTURA, DIAGRAMA_CORREGIDO, PRUEBAS
+└── docs/                          # ARQUITECTURA, DIAGRAMA_CORREGIDO, PRUEBAS, BITACORA_IAG
 ```
 
 ## 2. Topología (4 nodos del diagrama -> 3 JVM + cliente)

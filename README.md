@@ -9,14 +9,18 @@ Implementación en **Java + ICE** del diagrama arquitectónico corregido (Punto 
 
 ```
 .
-├── docs/Tarea_1_Interpretacion_Diseno.pdf  # Enunciado oficial (Puntos 1–4 + RAS)
+├── docs/
+│   ├── Tarea_1_Interpretacion_Diseno.pdf  # Enunciado oficial (Puntos 1–4 + RAS)
+│   └── Diagrama_ApexStore.pdf             # Diagrama para el informe (Visual Paradigm)
 ├── apexstore-ice/                          # Proyecto Java + ICE (Punto 4)
 │   ├── slice/ApexStore.ice                 # Contrato Slice unificado
-│   ├── src/main/java/com/apexstore/         # Nodos 1–4
-│   ├── config/                             # Configs ICE por nodo
+│   ├── src/main/java/com/apexstore/         # Nodos 1–4 (common, db, gateways, backend, client)
+│   ├── config/                             # Configs ICE por nodo (db, gateways, backend, client)
 │   ├── scripts/                            # run-all.sh / stop-all.sh
-│   ├── docs/                               # Arquitectura, diagrama, pruebas
+│   ├── docs/                               # ARQUITECTURA, DIAGRAMA_CORREGIDO, PRUEBAS, BITACORA_IAG
+│   ├── build.gradle / settings.gradle      # ice-compat 3.7.10 + tarea generateSlice
 │   └── README.md                           # Guía completa del proyecto
+├── .gitignore                              # Único gitignore (raíz, cubre build/ y generados)
 └── README.md                               # Este archivo
 ```
 
@@ -39,10 +43,12 @@ Detalle completo, topología, evidencias y solución de problemas: ver
 | Documento | Contenido |
 |---|---|
 | `docs/Tarea_1_Interpretacion_Diseno.pdf` | Enunciado: RAS-01…04, Puntos 1–4 |
+| `docs/Diagrama_ApexStore.pdf` | Diagrama exportado de Visual Paradigm para el informe |
 | `apexstore-ice/README.md` | Guía del proyecto: estructura, ejecución, RAS, bitácora IAG |
 | `apexstore-ice/docs/ARQUITECTURA.md` | Defectos Punto 1 → correcciones Punto 3 → mapeo a código |
 | `apexstore-ice/docs/DIAGRAMA_CORREGIDO.md` | Diagrama corregido (referencia para Visual Paradigm) |
 | `apexstore-ice/docs/PRUEBAS.md` | Plan de pruebas + evidencias reales de ejecución |
+| `apexstore-ice/docs/BITACORA_IAG.md` | Bitácora IAG Nivel 3 (DeepSeek + Claude Haiku 4.5, solo revisión) |
 
 ## Entregable (PDF)
 
