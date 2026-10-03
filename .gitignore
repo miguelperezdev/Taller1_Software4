@@ -6,10 +6,7 @@ Thumbs.db
 *.log
 *.class
 
-# Gradle / Java (raiz o anidado en apexstore-ice/)
+# Gradle / Java
 build/
 .gradle/
 src/generated/
-apexstore-ice/build/
-apexstore-ice/.gradle/
-apexstore-ice/src/generated/
