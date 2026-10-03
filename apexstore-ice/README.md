@@ -109,9 +109,5 @@ cbOneway.notificarTransaccionExitosa(resultadoFinal);        // oneway
 
 ## 8. Anexo — Bitácora de uso de IAG (Nivel 3, obligatoria en el PDF)
 
-1. **Herramienta y versión:** Muse Spark 1.3 (OpenCode) — generación de base.
-2. **Prompts principales:** "generar base Java+ICE del diagrama corregido Punto 4,
-   pasarelas simuladas, organizar carpetas" (ver historial del chat).
-3. **Evaluación crítica y corrección humana:** [COMPLETAR por el equipo:
-   qué errores/omisiones detectaron en la base, qué ajustaron al diagrama
-   corregido de su Punto 3, pruebas realizadas y tiempos medidos.]
+Ver **[`docs/BITACORA_IAG.md`](docs/BITACORA_IAG.md)**: herramientas (DeepSeek + Claude Haiku 4.5),
+8 prompts de revisión/opinión por fases, decisiones humanas por archivo y declaración de autoría.
