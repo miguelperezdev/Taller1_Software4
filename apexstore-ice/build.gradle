@@ -1,0 +1,80 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Runtime del mapping COMPAT de Ice 3.7 (paquete Ice.* generado con slice2java --compat)
+    implementation 'com.zeroc:ice-compat:3.7.10'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+// ---- ICE Slice -> Java (compat mapping, Ice 3.7) ----
+def sliceFile = file('slice/ApexStore.ice')
+def generatedDir = file('src/generated/java')
+
+tasks.register('generateSlice', Exec) {
+    description = 'Genera codigo Java desde Slice con slice2java --compat'
+    group = 'ice'
+    executable = 'slice2java'
+    args = ['--compat', '--output-dir', generatedDir.absolutePath, sliceFile.absolutePath]
+    doFirst {
+        generatedDir.mkdirs()
+    }
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs += generatedDir
+        }
+    }
+}
+
+tasks.named('compileJava') {
+    dependsOn 'generateSlice'
+}
+
+application {
+    // Clase por defecto (se puede sobreescribir con -PmainClass o ./gradlew run -Dmain=...)
+    mainClass = 'com.apexstore.client.ClienteApp'
+}
+
+// Tareas de conveniencia para lanzar cada nodo
+def iceCp = { sourceSets.main.runtimeClasspath }
+
+tasks.register('runDatabase', JavaExec) {
+    group = 'apexstore'
+    description = 'Nodo 4: Servidor Base de Datos Transaccional (puerto 10000)'
+    classpath = sourceSets.main.output + configurations.runtimeClasspath
+    mainClass = 'com.apexstore.db.DatabaseServer'
+}
+
+tasks.register('runGateways', JavaExec) {
+    group = 'apexstore'
+    description = 'Nodo 3: Servidor Pasarelas y Estrategias de Pago (puerto 10001)'
+    classpath = sourceSets.main.output + configurations.runtimeClasspath
+    mainClass = 'com.apexstore.gateways.GatewaysServer'
+}
+
+tasks.register('runBackend', JavaExec) {
+    group = 'apexstore'
+    description = 'Nodo 2: Servidor E-Commerce Backend Core (puerto 10002)'
+    classpath = sourceSets.main.output + configurations.runtimeClasspath
+    mainClass = 'com.apexstore.backend.BackendServer'
+}
+
+tasks.register('runClient', JavaExec) {
+    group = 'apexstore'
+    description = 'Nodo 1: Cliente front-end simulado (WebApp/MobileApp)'
+    classpath = sourceSets.main.output + configurations.runtimeClasspath
+    mainClass = 'com.apexstore.client.ClienteApp'
+}
