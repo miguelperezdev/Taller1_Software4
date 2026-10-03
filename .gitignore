@@ -1,3 +1,15 @@
+# Sistema / OS
 .DS_Store
 Thumbs.db
+
+# Logs y clases sueltas
 *.log
+*.class
+
+# Gradle / Java (raiz o anidado en apexstore-ice/)
+build/
+.gradle/
+src/generated/
+apexstore-ice/build/
+apexstore-ice/.gradle/
+apexstore-ice/src/generated/
