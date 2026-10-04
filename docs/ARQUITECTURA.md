@@ -1,50 +1,86 @@
-# Punto 3 -> Punto 4: rediseño aplicado y mapeo a código
+# Del diagrama corregido al código (Puntos 3 y 4)
 
-## 1. Defectos del diagrama original y corrección
+## 1. Nodos, artefactos y componentes
 
-| # | Defecto (Punto 1) | Principio violado | Corrección (Punto 3) | Evidencia en código |
-|---|---|---|---|---|
-| D1 | Firmas heterogéneas por pasarela (`autorizarCargoStripe(tokenTarjeta,montoUSD,cvc)` vs `debitarTransferenciaPSE(...)` vs `generarCobroCriptoBtc(...)`) | OCP, DIP, LSP, ocultamiento de información | **Interfaz única** `EstrategiaPago.pagar(OrdenPago, PagoCallback*)` con `OrdenPago.datosPago` opaco | `slice/ApexStore.ice` + `gateways/EstrategiaBase.java` |
-| D2 | `EstrategiaCripto -> persistirTransaccionExitosa` directo a DB, bypaseando al contexto (el contexto nunca se entera, Punto 2d) | SRP, encapsulamiento | **Prohibido escribir directo**; Cripto confirma vía `PagoCallback` y **solo el contexto** persiste | `gateways/EstrategiaCriptoImpl.java`, `backend/ProcesadorPagosContextoImpl.onCallback()` |
-| D3 | DB con 2 operaciones (`persistirTransaccionPostgres` / `persistirTransaccionExitosa`) según quién llame | ISP, uniformidad | **Una sola** `persistirTransaccion(resultado, orden)` con upsert por `idOrden` (PERSIST del ACK + ACTUALIZA del callback) | `db/TransaccionesDBImpl.java` |
-| D4 | Despacho síncrono bloqueante hacia bancos (15 s congelan thread pool) | Disponibilidad | **ACK Pendiente + callback oneway async** en pool propio por pasarela | `gateways/EstrategiaBase.pagar()` |
-| D5 | Fallo de una pasarela (PSE caído / mempool BTC) contamina a las demás | Bulkhead / tolerancia a fallos | **try/catch + proxy por medio + pools separados**; el contexto aísla el fallo | `backend/ProcesadorPagosContextoImpl.iniciarPagoOrden()` |
+Cada nodo del diagrama de despliegue es un programa independiente y cada artefacto es el jar
+que se instala en ese nodo.
 
-## 2. Mapeo componente Slice -> clase Java -> nodo
-
-| Interfaz Slice | Rol patrón | Clase servant | Nodo / proceso |
+| Nodo del diagrama | Artefacto | Clase principal | Componentes (clases) |
 |---|---|---|---|
-| `ServicioCheckout` | Facade | `ServicioCheckoutImpl` | N2 `BackendServer` |
-| `ProcesadorPagos` | Strategy Context | `ProcesadorPagosContextoImpl` | N2 `BackendServer` |
-| `PagoCallback` | Observer (oneway) | `CallbackServant` (interno del contexto) | N2 `BackendServer` (`ProcesadorCallback`) |
-| `EstrategiaPago` | Strategy (x4) | `EstrategiaStripe/PSE/Cripto/BilleteraImpl` | N3 `GatewaysServer` |
-| `PersistenciaTransaccional` | Repository ACID | `TransaccionesDBImpl` | N4 `DatabaseServer` |
+| Computador / Smartphone del Cliente | `cliente.jar` | `cliente.ClienteApp` | WebApp y MobileApp (simuladas por `ClienteApp`) |
+| Servidor E-Commerce (Backend Core) | `backend.jar` | `backend.ServidorECommerce` | `ServicioCheckout`, `ProcesadorPagosContexto`, `ReceptorResultadosPagos` |
+| Servidor de Pasarelas y Estrategias de Pago | `pagos.jar` | `pagos.ServidorPasarelas` | `EstrategiaStripe`, `EstrategiaPSE`, `EstrategiaCripto`, `EstrategiaBilleteraDigital` |
+| Servidor Base de Datos Transaccional | `persistencia.jar` | `persistencia.ServidorBaseDatos` | `ServidorPersistencia` + esquema `apexstore_tx` (JDBC) |
 
-## 3. Secuencia de un pago (ej. Stripe)
+Los caminos de comunicación del diagrama son los proxies de `config/`: el cliente solo conoce el
+backend, el backend conoce las pasarelas y la base de datos, y las pasarelas solo conocen el
+receptor del backend (por el proxy que reciben en cada pago). No hay conexión entre el nodo de
+pagos y el de base de datos.
 
-1. `ClienteApp.gestionarCompra(orden)` -> `ServicioCheckout` (N1->N2).
-2. `ServicioCheckout` -> `ProcesadorPagos.iniciarPagoOrden` (intra-N2).
-3. Contexto resuelve `Stripe -> EstrategiaStripe:tcp:10001`, llama `pagar(orden, callback)`; la
-   pasarela retorna `Pendiente` en <50 ms; el contexto persiste el ACK (anti-huérfanos).
-4. Hilo async de la pasarela simula el cobro (150-500 ms) y llama
-   `ProcesadorCallback.notificarTransaccionExitosa(resultado)` **oneway** (N3->N2).
-5. `onCallback` actualiza el estado en memoria y hace `persistirTransaccion` idempotente (N2->N4).
-6. El cliente ve el resultado final con `consultarCompra` (polling; en producción: push).
+## 2. Interfaces
 
-## 4. Cobertura RAS
+| Interfaz (diagrama y Slice) | La provee | La requiere | Operaciones |
+|---|---|---|---|
+| `IGestionCompras` | ServicioCheckout | WebApp, MobileApp | `gestionarCompra`, `consultarCompra` |
+| `IProcesadorPagos` | ProcesadorPagosContexto | ServicioCheckout | `iniciarPagoOrden`, `consultarEstado` |
+| `IEstrategiaPago` | las 4 estrategias | ProcesadorPagosContexto | `pagar(orden, callback)` |
+| `INotificacionPago` | ReceptorResultadosPagos | las 4 estrategias | `notificarResultadoPago` |
+| `IPersistenciaTransaccional` | ServidorPersistencia | ProcesadorPagosContexto, ReceptorResultadosPagos | `registrarOrden`, `actualizarEstado`, `consultarTransaccion` |
 
-- **RAS-01:** ningún hilo del backend espera a bancos; callbacks oneway + pools por pasarela.
-- **RAS-02:** despacho medido e impreso en consola (`despacho=Xms objetivo<250ms`).
-- **RAS-03:** `synchronized` + upsert idempotente por `idOrden` (sin doble cobro)
-  + ACK inicial anti-huérfanos + log de auditoría (ver `docs/PRUEBAS.md §2`).
-- **RAS-04:** `BilleteraDigital` como prueba viva de OCP (1 clase + 2 registros).
+Cada componente depende de la interfaz del otro y no de su clase, incluso dentro del mismo nodo:
+`ServidorECommerce` publica los tres componentes en el adaptador ICE y les pasa proxies.
 
-## 5. Diagrama corregido (para redibujar en Visual Paradigm)
+## 3. Correcciones del Punto 1 y dónde están en el código
 
-```
-[Nodo1 Front] --gestionarCompra--> [Nodo2: ServicioCheckout] --iniciarPagoOrden--> [ProcesadorPagosContexto]
-[ProcesadorPagosContexto] --pagar(OrdenPago)<<Strategy>>--> [EstrategiaStripe|PSE|Cripto|Billetera] (Nodo3)
-[Estrategias] --notificarTransaccionExitosa [oneway, async]--> [ProcesadorCallback] (Nodo2)
-[ProcesadorPagosContexto] --persistirTransaccion [unica op]--> [DB PostgreSQL] (Nodo4)
-NOTA: no existe flecha Estrategia->DB. Todas las estrategias implementan la MISMA interfaz.
-```
+| Mal uso en el diagrama original | Corrección | Código |
+|---|---|---|
+| Tres interfaces distintas para las estrategias; el contexto conocía cada medio | Una sola `IEstrategiaPago`; los datos del medio viajan como token opaco en `OrdenPago.datosPago` | `ApexStore.ice`, `EstrategiaPagoBase` |
+| Dependencia circular contexto ↔ estrategias por `notificarTransaccionExitosa` | El callback lo provee un componente aparte; las dependencias quedan contexto → estrategias → receptor → persistencia | `ReceptorResultadosPagos` |
+| El callback solo cubría el éxito | `notificarResultadoPago` informa aprobado, rechazado o en verificación | `INotificacionPago` |
+| EstrategiaCripto escribía directo en la base de datos | Cripto notifica igual que las demás; ninguna estrategia conoce la persistencia | `EstrategiaCripto` |
+| El cliente no tenía cómo conocer el resultado | `consultarCompra` / `consultarEstado` | `ServicioCheckout`, `ClienteApp` |
+| El contexto debía modificarse por cada medio nuevo | Las estrategias se buscan por configuración (`Pagos.<medio>.Proxy`) | `ProcesadorPagosContexto.estrategiaPara` |
+
+## 4. Flujo de un pago
+
+1. `ClienteApp` llama `gestionarCompra(orden)` en `ServicioCheckout`, que valida la orden.
+2. `ProcesadorPagosContexto` busca la estrategia del medio y registra la orden como Pendiente
+   (`registrarOrden`). Si la orden ya existía, devuelve su estado sin volver a cobrar.
+3. El contexto llama `pagar(orden, receptor)` con un tiempo máximo de 2 s. La estrategia valida
+   el token, deja el cobro en su propio pool de hilos y responde Pendiente en pocos milisegundos.
+4. Cuando la pasarela simulada responde, la estrategia llama `notificarResultadoPago` en el
+   receptor, que guarda el nuevo estado con `actualizarEstado`. Si la notificación falla se
+   reintenta hasta 3 veces; como es idempotente, repetirla no cambia nada.
+5. El cliente consulta con `consultarCompra` hasta ver Aprobado o Rechazado.
+
+## 5. Requerimientos arquitectónicos
+
+**RAS-01 (disponibilidad).** Ningún hilo del backend espera al banco: `pagar` solo devuelve un
+acuse y el resultado llega por callback. Cada estrategia tiene su propio pool, así una pasarela
+lenta no ocupa los hilos de las otras. El contexto tiene un circuit breaker por medio
+(`InterruptorCircuito`): tras 3 fallos seguidos deja de intentar ese medio durante 15 s y responde
+de inmediato.
+
+**RAS-02 (latencia).** El despacho interno mide su tiempo y lo registra (`contexto ... en N ms`);
+en las pruebas locales está entre 2 y 50 ms, lejos de los 250 ms del P95. El tiempo máximo de 2 s
+sobre `pagar` acota el peor caso.
+
+**RAS-03 (integridad).** La orden se registra antes de cobrar, así nunca existe un cobro sin orden.
+`idOrden` es la llave primaria: una orden repetida no se registra ni se cobra otra vez. Cada cambio
+de estado es una transacción JDBC que bloquea la fila (`SELECT ... FOR UPDATE`), valida la
+transición (un pago aprobado no vuelve a pendiente) y escribe la tabla `auditoria`. Si la pasarela
+no responde a tiempo, el pago queda EnVerificacion en lugar de fallido, porque pudo haberse cobrado.
+Los datos del medio de pago no se guardan en la base de datos.
+
+**RAS-04 (extensibilidad).** `EstrategiaBilleteraDigital` se agregó con una clase nueva, una línea
+en `ServidorPasarelas` y una en `backend.config`, sin tocar el contexto, las otras estrategias ni
+el contrato Slice.
+
+## 6. Diferencias deliberadas con el diagrama
+
+- Entre clientes y backend el diagrama indica HTTPS. El cliente de prueba usa ICE sobre TCP porque
+  es una aplicación Java; en producción ese camino sería ICE sobre WSS/TLS o HTTPS.
+- La base de datos por defecto es H2 en memoria en modo PostgreSQL para que la demo no requiera
+  instalar nada. Con `BaseDatos.Url` se apunta al PostgreSQL del diagrama sin cambiar código.
+- Una orden que queda EnVerificacion sin notificación posterior requiere conciliación con la
+  pasarela; ese proceso está fuera del alcance de la tarea.
