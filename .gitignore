@@ -1,12 +1,34 @@
-# Sistema / OS
+# Compilación (incluye el código generado por slice2java y los jars)
+build/
+.gradle/
+out/
+bin/
+*.class
+*.jar
+
+# Registros
+*.log
+logs/
+
+# IDE y editores
+.idea/
+*.iml
+.vscode/
+.project
+.classpath
+.settings/
+*.swp
+*~
+
+# Sistema operativo
 .DS_Store
 Thumbs.db
 
-# Logs y clases sueltas
-*.log
-*.class
+# Visual Paradigm: respaldos automáticos, copias y bloqueos
+*.vpp.bak*
+*.vpp.respaldo*
+*.lck
 
-# Gradle / Java
-build/
-.gradle/
-src/generated/
+# Variables de entorno y credenciales locales
+.env
+*.local.config
