@@ -1,88 +1,77 @@
-// ============================================================================
-// ApexStore — Contrato Slice UNIFICADO (diagrama corregido Punto 3)
-// Middleware: ICE 3.7 (compat mapping) — slice2java --compat
-// ============================================================================
-// Correcciones aplicadas respecto al diagrama original:
-//  C1. Firmas heterogeneas (autorizarCargoStripe / debitarTransferenciaPSE /
-//      generarCobroCriptoBtc) -> UNA sola interfaz EstrategiaPago.pagar().
-//      (OCP/DIP/LSP + ocultamiento de informacion, RAS-04)
-//  C2. Cripto escribia directo a DB (persistirTransaccionExitosa) bypaseando
-//      al contexto -> ELIMINADO. Toda estrategia notifica via PagoCallback y
-//      solo el contexto persiste. (SRP, RAS-03 ACID, Punto 2d)
-//  C3. DB exponia 2 operaciones distintas -> UNA sola: persistirTransaccion.
-//  C4. Despacho bloqueante -> pagar() retorna ACK Pendiente en <50ms y el
-//      cobro real se confirma async con notificarTransaccionExitosa oneway.
-//      (RAS-01 disponibilidad, RAS-02 P95 < 250ms, Punto 2b)
-// ============================================================================
+// Contrato ICE de ApexStore.
+//
+// Cada interfaz corresponde a una interfaz provista del diagrama de despliegue
+// corregido (Punto 3). Los nodos solo se conocen a través de estas interfaces.
 
-module ApexStore {
+#pragma once
 
-    enum EstadoPago {
-        Pendiente,
-        Autorizado,
-        Rechazado,
-        Fallido,
-        Reembolsado
-    };
+module ApexStore
+{
+    // Pendiente:      la pasarela recibió el cobro y aún no responde.
+    // EnVerificacion: no se sabe todavía si el dinero se movió (banco lento,
+    //                 red blockchain congestionada, timeout). Nunca se marca
+    //                 como fallido algo que pudo haberse cobrado.
+    enum EstadoPago { Pendiente, EnVerificacion, Aprobado, Rechazado };
 
-    enum MedioPago {
-        Stripe,
-        PSE,
-        Cripto,
-        BilleteraDigital
-    };
-
-    // Orden agnostica al medio: datosPago es opaco (token/banco/wallet) para
-    // preservar ocultamiento de informacion. Cada estrategia lo interpreta.
-    struct OrdenPago {
-        string idOrden;
-        MedioPago medio;
-        double monto;
-        string moneda;
+    struct OrdenPago
+    {
+        string idOrden;     // identifica la orden y sirve de clave de idempotencia
         string clienteId;
-        string datosPago;
+        string medio;       // "stripe", "pse", "cripto", "billetera", ...
+        long monto;         // en la unidad mínima de la moneda (centavos, satoshis)
+        string moneda;
+        string datosPago;   // token del medio de pago; solo la estrategia lo interpreta
     };
 
-    struct ResultadoPago {
+    struct ResultadoPago
+    {
         string idOrden;
         EstadoPago estado;
-        string codigoAutorizacion;
+        string codigo;
         string mensaje;
     };
 
-    // Callback async invocado por las pasarelas ( Patron Observer via ICE ).
-    // Se declara oneway: la pasarela no se bloquea esperando al contexto.
-    interface PagoCallback {
-        ["oneway"] void notificarTransaccionExitosa(ResultadoPago resultado);
+    exception OrdenNoEncontrada
+    {
+        string idOrden;
     };
 
-    // Interfaz ESTRATEGIA comun ( Patron Strategy ). Todas las pasarelas
-    // implementan EXACTAMENTE esta firma. Agregar un medio nuevo = crear una
-    // clase mas que implemente esta interfaz, sin tocar el contexto (OCP).
-    interface EstrategiaPago {
-        // Retorna ACK inmediato (normalmente Pendiente). La confirmacion
-        // final llega despues via callback. SIMULADO: sin red bancaria real.
-        ResultadoPago pagar(OrdenPago orden, PagoCallback* callback);
+    // Provista por ReceptorResultadosPagos (nodo 2).
+    interface INotificacionPago
+    {
+        void notificarResultadoPago(ResultadoPago resultado);
     };
 
-    // Contexto Strategy (Nodo 2). Selecciona estrategia segun orden.medio.
-    interface ProcesadorPagos {
+    // Provista por cada estrategia del nodo 3. Responde de inmediato con
+    // Pendiente o Rechazado; el resultado final llega por el callback.
+    interface IEstrategiaPago
+    {
+        ResultadoPago pagar(OrdenPago orden, INotificacionPago* callback);
+    };
+
+    // Provista por ProcesadorPagosContexto (nodo 2).
+    interface IProcesadorPagos
+    {
         ResultadoPago iniciarPagoOrden(OrdenPago orden);
-        ResultadoPago consultarEstado(string idOrden);
+        ResultadoPago consultarEstado(string idOrden) throws OrdenNoEncontrada;
     };
 
-    // Fachada del backend hacia el front (Nodo 1 -> Nodo 2, HTTPS en el
-    // diagrama; aqui TCP ICE local).
-    interface ServicioCheckout {
+    // Provista por ServicioCheckout (nodo 2). Es lo único que ven los clientes.
+    interface IGestionCompras
+    {
         ResultadoPago gestionarCompra(OrdenPago orden);
-        ResultadoPago consultarCompra(string idOrden);
+        ResultadoPago consultarCompra(string idOrden) throws OrdenNoEncontrada;
     };
 
-    // Persistencia UNICA (Nodo 4). Un solo metodo para todos los medios.
-    // Garantia ACID simulada: atomicidad + idempotencia (no doble cobro,
-    // no pagos huerfanos) + log de auditoria.
-    interface PersistenciaTransaccional {
-        bool persistirTransaccion(ResultadoPago resultado, OrdenPago orden);
-        ResultadoPago consultarTransaccion(string idOrden);
+    // Provista por ServidorPersistencia (nodo 4).
+    interface IPersistenciaTransaccional
+    {
+        // false si la orden ya existía: no se registra (ni se cobra) dos veces.
+        bool registrarOrden(OrdenPago orden);
+
+        // false si la transición no es válida, p. ej. Aprobado -> Pendiente.
+        bool actualizarEstado(ResultadoPago resultado);
+
+        ResultadoPago consultarTransaccion(string idOrden) throws OrdenNoEncontrada;
     };
 };

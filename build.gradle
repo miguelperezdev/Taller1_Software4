@@ -1,6 +1,5 @@
 plugins {
     id 'java'
-    id 'application'
 }
 
 repositories {
@@ -8,73 +7,77 @@ repositories {
 }
 
 dependencies {
-    // Runtime del mapping COMPAT de Ice 3.7 (paquete Ice.* generado con slice2java --compat)
+    // Mapeo "compat" de Ice 3.7 (paquete Ice.*), el mismo de los ejemplos de clase
     implementation 'com.zeroc:ice-compat:3.7.10'
+
+    // Solo los usa el nodo de persistencia
+    runtimeOnly 'com.h2database:h2:2.2.224'
+    runtimeOnly 'org.postgresql:postgresql:42.7.8'
 }
 
-java {
-    sourceCompatibility = JavaVersion.VERSION_11
-    targetCompatibility = JavaVersion.VERSION_11
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+    options.encoding = 'UTF-8'
 }
 
-// ---- ICE Slice -> Java (compat mapping, Ice 3.7) ----
-def sliceFile = file('slice/ApexStore.ice')
-def generatedDir = file('src/generated/java')
+// ---------------------------------------------------------------- Slice -> Java
 
-tasks.register('generateSlice', Exec) {
-    description = 'Genera codigo Java desde Slice con slice2java --compat'
+def sliceDir = file('slice')
+def sliceSalida = layout.buildDirectory.dir('generated/slice')
+
+tasks.register('slice2java', Exec) {
     group = 'ice'
-    executable = 'slice2java'
-    args = ['--compat', '--output-dir', generatedDir.absolutePath, sliceFile.absolutePath]
-    doFirst {
-        generatedDir.mkdirs()
+    description = 'Genera las clases Java del contrato Slice (slice2java --compat).'
+    inputs.dir sliceDir
+    outputs.dir sliceSalida
+    doFirst { sliceSalida.get().asFile.mkdirs() }
+    executable 'slice2java'
+    args '--compat', '--output-dir', sliceSalida.get().asFile.path
+    args fileTree(sliceDir) { include '*.ice' }.files.collect { it.path }
+}
+
+sourceSets.main.java.srcDir(sliceSalida)
+tasks.named('compileJava') { dependsOn 'slice2java' }
+
+// ------------------------------------------------- un jar por nodo del diagrama
+//
+// Cada jar es el artefacto que se despliega en su nodo:
+//   persistencia.jar -> Servidor Base de Datos Transaccional
+//   pagos.jar        -> Servidor de Pasarelas y Estrategias de Pago
+//   backend.jar      -> Servidor E-Commerce (Backend Core)
+//   cliente.jar      -> simula WebApp / MobileApp
+
+def librerias = { boolean conJdbc ->
+    configurations.runtimeClasspath.filter { lib ->
+        conJdbc || !(lib.name.startsWith('h2-') || lib.name.startsWith('postgresql-'))
     }
 }
 
-sourceSets {
-    main {
-        java {
-            srcDirs += generatedDir
+def artefacto = { String nombre, String claseMain, boolean conJdbc ->
+    tasks.register("${nombre}Jar", Jar) {
+        group = 'apexstore'
+        description = "Empaqueta ${nombre}.jar"
+        archiveFileName = "${nombre}.jar"
+        manifest { attributes 'Main-Class': claseMain }
+
+        from(sourceSets.main.output) {
+            include 'ApexStore/**'
+            include 'com/apexstore/comun/**'
+            include "com/apexstore/${nombre}/**"
         }
+        from({ librerias(conJdbc).collect { zipTree(it) } }) {
+            exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA', 'META-INF/versions/**', 'module-info.class'
+        }
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     }
 }
 
-tasks.named('compileJava') {
-    dependsOn 'generateSlice'
-}
+artefacto('persistencia', 'com.apexstore.persistencia.ServidorBaseDatos', true)
+artefacto('pagos', 'com.apexstore.pagos.ServidorPasarelas', false)
+artefacto('backend', 'com.apexstore.backend.ServidorECommerce', false)
+artefacto('cliente', 'com.apexstore.cliente.ClienteApp', false)
 
-application {
-    // Clase por defecto (se puede sobreescribir con -PmainClass o ./gradlew run -Dmain=...)
-    mainClass = 'com.apexstore.client.ClienteApp'
-}
-
-// Tareas de conveniencia para lanzar cada nodo
-def iceCp = { sourceSets.main.runtimeClasspath }
-
-tasks.register('runDatabase', JavaExec) {
-    group = 'apexstore'
-    description = 'Nodo 4: Servidor Base de Datos Transaccional (puerto 10000)'
-    classpath = sourceSets.main.output + configurations.runtimeClasspath
-    mainClass = 'com.apexstore.db.DatabaseServer'
-}
-
-tasks.register('runGateways', JavaExec) {
-    group = 'apexstore'
-    description = 'Nodo 3: Servidor Pasarelas y Estrategias de Pago (puerto 10001)'
-    classpath = sourceSets.main.output + configurations.runtimeClasspath
-    mainClass = 'com.apexstore.gateways.GatewaysServer'
-}
-
-tasks.register('runBackend', JavaExec) {
-    group = 'apexstore'
-    description = 'Nodo 2: Servidor E-Commerce Backend Core (puerto 10002)'
-    classpath = sourceSets.main.output + configurations.runtimeClasspath
-    mainClass = 'com.apexstore.backend.BackendServer'
-}
-
-tasks.register('runClient', JavaExec) {
-    group = 'apexstore'
-    description = 'Nodo 1: Cliente front-end simulado (WebApp/MobileApp)'
-    classpath = sourceSets.main.output + configurations.runtimeClasspath
-    mainClass = 'com.apexstore.client.ClienteApp'
+tasks.named('jar') { enabled = false }
+tasks.named('assemble') {
+    dependsOn 'persistenciaJar', 'pagosJar', 'backendJar', 'clienteJar'
 }
