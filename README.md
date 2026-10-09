@@ -324,7 +324,41 @@ El campo `datosPago` lo interpreta solo la estrategia de cada medio:
 
 ## 9. Despliegue en varios equipos
 
-No hay que recompilar: solo se editan los archivos de `config/`. Ejemplo con la base de datos en
+> Los `config/*.config` versionados usan `127.0.0.1` (modo local). Las IPs reales **no se
+> versionan**: se aplican únicamente el día de la sustentación para la comunicación entre los
+> equipos, con el script de abajo. No hay que recompilar.
+
+### Reparto de la sustentación (2 equipos)
+
+| Equipo | Nodos | Puertos |
+|--------|-------|---------|
+| Mi PC | persistencia + backend | 10000, 10002 |
+| PC compañero | pagos | 10001 |
+| Cliente | cualquiera de los dos | — (apunta al backend) |
+
+### Configurar IPs con el script
+
+```bash
+scripts/configurar-red.sh <MI_IP> <IP_COMPANERO>
+scripts/configurar-red.sh --local   # vuelve a 127.0.0.1
+```
+
+El script reescribe solo las líneas `Endpoints` y `Proxy` de `config/`:
+
+| Archivo | Qué pone |
+|---------|----------|
+| `persistencia.config` | `Persistencia.Endpoints` con `<MI_IP>` |
+| `pagos.config` | `Pagos.Endpoints` con `<IP_COMPANERO>` |
+| `backend.config` | `Backend.Endpoints` y `Persistencia.Proxy` con `<MI_IP>`; las cuatro `Pagos.*.Proxy` con `<IP_COMPANERO>` |
+| `cliente.config` | `Checkout.Proxy` con `<MI_IP>` |
+
+Ambos equipos deben usar el mismo `config/` (hacer `git pull` después de configurarlo en un
+equipo, o copiar la carpeta). Si las IPs cambian el día de la presentación, se vuelve a correr
+el script con las nuevas IPs.
+
+### Configuración manual (sin el script)
+
+Ejemplo con la base de datos en
 `192.168.1.20`, las pasarelas en `192.168.1.21` y el backend en `192.168.1.22`:
 
 | Equipo | Archivo | Cambio |
