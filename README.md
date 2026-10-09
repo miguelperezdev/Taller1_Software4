@@ -356,6 +356,8 @@ Ambos equipos deben usar el mismo `config/` (hacer `git pull` después de config
 equipo, o copiar la carpeta). Si las IPs cambian el día de la presentación, se vuelve a correr
 el script con las nuevas IPs.
 
+Guía paso a paso del día de la sustentación: `docs/DESPLIEGUE_DISTRIBUIDO.md`.
+
 ### Configuración manual (sin el script)
 
 Ejemplo con la base de datos en
